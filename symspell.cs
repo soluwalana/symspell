@@ -31,8 +31,8 @@ using System.Diagnostics;
 
 static class SymSpell
 {
-    private static int editDistanceMax=2;
-    private static int verbose = 0;
+    private static int editDistanceMax = 2;
+    private static int verbose = 1;
     //0: top suggestion
     //1: all suggestions of smallest edit distance 
     //2: all suggestions <= editDistanceMax (slower, no early termination)
@@ -93,9 +93,9 @@ static class SymSpell
     //language independent (e.g. works with Chinese characters)
     private static IEnumerable<string> parseWords(string text)
     {
-        return Regex.Matches(text.ToLower(), @"[\w-[\d_]]+")
-                    .Cast<Match>()
-                    .Select(m => m.Value);
+        
+        MatchCollection matches =  Regex.Matches(text.ToLower(), @"[\w\-\d_]+");
+        return matches.Cast<Match>().Select(m => m.Value);
     }
 
     //for every word there all deletes with an edit distance of 1..editDistanceMax created and added to the dictionary
@@ -168,7 +168,7 @@ static class SymSpell
         {
             if (CreateDictionaryEntry(key, language)) wordCount++;
         }
-        Console.WriteLine("\rDictionary created: " + wordCount.ToString("N0") + " words, " + dictionary.Count.ToString("N0") + " entries, for edit distance=" + editDistanceMax.ToString());
+        Console.WriteLine("\rDictionary created: " + wordCount.ToString() + " words, " + dictionary.Count.ToString() + " entries, for edit distance=" + editDistanceMax.ToString());
     }
 
     //save some time and space
@@ -345,7 +345,7 @@ static class SymSpell
     private static void ReadFromStdIn()
     {
         string word;
-        while (!string.IsNullOrEmpty(word = (Console.ReadLine() ?? "").Trim()))
+        while (!string.IsNullOrEmpty(word = (Console.ReadLine() ?? "").Trim().ToLower()))
         {
             Correct(word,"en");
         }
