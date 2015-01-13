@@ -8,7 +8,6 @@
 // Port Author: SamO
 // Original Author: Wolf Garbe <wolf.garbe@faroo.com>
 //
-// Todo: mimic verbosity of original version
 package main
 
 
@@ -17,35 +16,79 @@ import (
 	"sync"
 	"errors"
 	"math"
+	"hash"
+	"hash/fnv"
 )
 
 const EDIT_DISTANCE uint = 2
-const VERBOSITY uint = 2
 
+
+/* very loosely defined hash table to reduce size of the 
+   symspell dictionary. No Deletion supported */
+type DefinitionOrdinals struct {
+	sync.RWMutex
+	definitions map[uint64][]string
+	hasher hash.Hash64
+}
+
+func NewDefinitionOrdinals() (*DefinitionOrdinals){
+	var do DefinitionOrdinals
+	do.definitions = make(map[uint64][]string)
+	do.hasher = fnv.New64()
+	return &do
+}
+
+/* Takes the definition string and computes a hash for it, 
+   the hash is then used as the index in a map and the definition
+   is stored there. */
+func (self *DefinitionOrdinals) Add(definition string) uint64 {
+	self.Lock()
+	defer self.Unlock()
+	self.hasher.Reset()
+	self.hasher.Write([]byte(definition))
+	sum := self.hasher.Sum64()
+	self.definitions[sum] = append(self.definitions[sum], definition)
+	return sum
+ }
+
+/*  Retrieves the definitions given the hash 
+    (may be more than one due to hash collisions) */
+func (self *DefinitionOrdinals) Get(hash uint64) []string {
+	self.RLock()
+	defer self.RUnlock()
+	if data, ok := self.definitions[hash]; ok {
+		return data
+	}
+	return []string{}
+}
+	
 
 type DictItem struct {
 	Term string
 	Count uint
 	Suggestions map[string]uint
-	Definitions []string
+	Definitions map[uint64]bool
 }
 
 type SuggestItem struct {
 	Term string
 	Distance uint
 	Count uint
+	Definitions []string
 }
 
 
 type SymSpell struct {
 	Dictionary map[string]*DictItem
+	Ordinals *DefinitionOrdinals
 	sync.RWMutex
 }
 
-func NewSymSpell() (*SymSpell, error) {
+func NewSymSpell() (*SymSpell) {
 	var symSpell SymSpell
 	symSpell.Dictionary = make(map[string]*DictItem)
-	return &symSpell, nil
+	symSpell.Ordinals = NewDefinitionOrdinals()
+	return &symSpell
 }
 
 //for every word there all deletes with an edit distance of 1..editDistanceMax created and added to the dictionary
@@ -71,13 +114,15 @@ func (self *SymSpell) AddEntry(term string, definitions []string) (bool, error) 
 	} else {
 		entry = new(DictItem)
 		entry.Suggestions = make(map[string]uint)
+		entry.Definitions = make(map[uint64]bool)
 		self.Dictionary[term] = entry
 	}
 
 	entry.Count ++
 
 	for _, def := range definitions {
-		entry.Definitions = append(entry.Definitions, def)
+		hash := self.Ordinals.Add(def)
+		entry.Definitions[hash] = true
 	}
 
 	//edits/suggestions are created only once, no matter how often word occurs
@@ -95,12 +140,12 @@ func (self *SymSpell) AddEntry(term string, definitions []string) (bool, error) 
                 //1. word1==deletes(word2) 
                 //2. deletes(word1)==deletes(word2) 
 				if _, ok := entry2.Suggestions[term]; !ok {
-					//self.AddLowestDistance(entry2.Suggestions, term, distance)
 					entry2.Suggestions[term] = distance;
 				}
 			} else {
 				suggested := new(DictItem)
 				suggested.Suggestions = make(map[string]uint)
+				suggested.Definitions = make(map[uint64]bool)
 				suggested.Suggestions[term] = distance
 				self.Dictionary[edit] = suggested
 			}
@@ -108,30 +153,6 @@ func (self *SymSpell) AddEntry(term string, definitions []string) (bool, error) 
 	}
 	return added, nil
 }
-
-//save some time and space
-/*func (self *SymSpell) AddLowestDistance(suggestions map[string]uint, edit string, distance uint) {
-	//remove all existing suggestions of higher distance, if verbose<2
-	if VERBOSITY < 2 && len(suggestions) > 0 {
-		for _, suggest := range suggestions {
-			if suggest > distance {
-				delete(suggestions, edit)
-			}
-		}
-	}
-    
-    //do not add suggestion of higher distance than existing, if verbose<2
-	if VERBOSITY == 2 || len(suggestions) == 0 {
-		suggestions[edit] = distance;
-	} else {
-		for _, suggest := range suggestions {
-			if suggest >= distance {
-				suggestions[edit] = distance;		
-			}
-			break;
-		}
-	}
-}*/
 
 func (self *SymSpell) Edits(term string, distance uint, edits map[string]uint, recursive bool) map[string]uint {
 	distance ++
@@ -180,7 +201,6 @@ func (self *SymSpell) Lookup(input string) []SuggestItem {
 				if _, ok := suggestions[si.Term]; !ok {
 					suggestions[si.Term] = si
 				}
-				//if verbose < 2 && distance == 0 { break; }
 			}
 
 			for suggest, sDistance := range value.Suggestions {
@@ -243,8 +263,28 @@ func TrueDistance(suggest string, sDistance uint, candidate string, cDistance ui
 // from http://en.wikipedia.org/wiki/Damerau%E2%80%93Levenshtein_distance
 
 func LevDistance(source string, target string) uint {
-	m := len(source)
-	n := len(target)
+
+	// Set up arrays for levenshtein on unicode characters
+	s1 := make([]rune, len(source)) 
+	s2 := make([]rune, len(target))
+	m, n := 0, 0
+	sd := make(map[rune]int)
+	
+	for _, char := range source {
+		s1[m] = char
+		if _, ok := sd[char]; !ok {
+			sd[char] = 0
+		}
+		m ++
+	}
+	for _, char := range target {
+		s2[n] = char
+		if _, ok := sd[char]; !ok {
+			sd[char] = 0
+		}
+		n ++
+	}
+
 	H := make([][]int, m + 2)
 	for i := range H {
 		H[i] = make([]int, n + 2)
@@ -260,20 +300,13 @@ func LevDistance(source string, target string) uint {
 		H[0][j + 1] = INF
 	}
 
-	sd := make(map[uint8]int)
-	for _, char := range source + target {
-		if _, ok := sd[uint8(char)]; !ok {
-			sd[uint8(char)] = 0
-		}
-	}
-
 	for i := 1; i <= m; i ++ {
 		DB := 0
 		for j := 1; j <= n; j ++ {
-			i1 := sd[target[j - 1]]
+			i1 := sd[s2[j - 1]]
 			j1 := DB
 
-			if source[i - 1] == target [j - 1] {
+			if s1[i - 1] == s2[j - 1] {
 				H[i + 1][j + 1] = H[i][j]
 				DB = j
 			} else {
@@ -283,7 +316,7 @@ func LevDistance(source string, target string) uint {
 			H[i + 1][j + 1] = int(math.Min(float64(H[i +1][j + 1]), float64(H[i1][j1] + (i + i1 - 1) + 1 + (j - j1 - 1))))
 		}
 
-		sd[source[i - 1]] = i
+		sd[s1[i - 1]] = i
 	}
 	return uint(H[m + 1][n + 1])
 }
@@ -297,7 +330,7 @@ func arbitraryKey(input map[string]uint) string {
 }
 
 func main() {	
-	ss, _ := NewSymSpell()
+	ss:= NewSymSpell()
 	ss.AddEntry("hello", []string{"What is the definition for hello?",})
 	fmt.Println(ss.Lookup("zello"))
 }

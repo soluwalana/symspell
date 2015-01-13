@@ -7,8 +7,7 @@ import (
 
 func TestSymSpell(t *testing.T) {
 	assert := assert.New(t)
-	ss, err := NewSymSpell()
-	assert.Nil(err)
+	ss := NewSymSpell()
 	assert.NotNil(ss)
 	assert.Equal(LevDistance("hello", "elo"), 2, "elo == 2")
 	assert.Equal(LevDistance("hello", "ello"), 1, "ello == 1")
@@ -24,7 +23,9 @@ func TestSymSpell(t *testing.T) {
 	assert.Equal(LevDistance("hello", "hello"), 0, "hello == 0")
 	assert.Equal(LevDistance("hello", "hello!"), 1, "hello! == 1")
 	assert.Equal(LevDistance("hello", "hello WORLD!"), 7, "hello WORLD! == 1")
-
+	assert.Equal(LevDistance("にほん", "にほんご"), 1, "japan vs japanese == 1")
+	assert.Equal(LevDistance("にほu", "にほん"), 1, "japan vs japanese == 1")
+	assert.Equal(LevDistance("にほん", "日本"), 3, "japan vs japan (hiragana vs kanji) == 3")
 	ss.AddEntry("hello", []string{"a greeting",})
 	ss.AddEntry("something", []string{"An item that exists",})
 	
