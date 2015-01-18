@@ -313,7 +313,7 @@ func LevDistance(source string, target string) uint {
 				H[i + 1][j + 1] = int(math.Min(float64(H[i][j]), math.Min(float64(H[i + 1][j]), float64(H[i][j + 1])))) + 1
 			}
 
-			H[i + 1][j + 1] = int(math.Min(float64(H[i +1][j + 1]), float64(H[i1][j1] + (i + i1 - 1) + 1 + (j - j1 - 1))))
+			H[i + 1][j + 1] = int(math.Min(float64(H[i +1][j + 1]), float64(H[i1][j1] + (i - i1 - 1) + 1 + (j - j1 - 1))))
 		}
 
 		sd[s1[i - 1]] = i
@@ -333,4 +333,5 @@ func main() {
 	ss:= NewSymSpell()
 	ss.AddEntry("hello", []string{"What is the definition for hello?",})
 	fmt.Println(ss.Lookup("zello"))
+    fmt.Println('\x00')
 }
